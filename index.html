@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Financial Dashboard - Account Summary</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for in-browser JSX transpilation -->
+    <script crossorigin src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-[#FAF9F5]">
+    <div id="root">
+        <div class="min-h-screen flex items-center justify-center">
+            <p class="text-gray-500 font-medium animate-pulse">Loading secure dashboard...</p>
+        </div>
+    </div>
+
+    <!-- Firebase Modular Imports via standard ES Module -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js';
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js';
+        import { getFirestore, collection, addDoc, onSnapshot } from 'https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js';
+
+        // Expose to window so our Babel-compiled React app can access them
+        window.FirebaseDeps = {
+            initializeApp, getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged,
+            getFirestore, collection, addDoc, onSnapshot
+        };
+        
+        // Signal that Firebase is ready to be used
+        window.dispatchEvent(new Event('firebase-ready'));
+    </script>
+
+    <script type="text/babel">
+        // Start the app once dependencies are loaded
+        const initializeReactApp = () => {
+            const { useState, useEffect } = React;
+            const { 
+                initializeApp, getAuth, signInWithCustomToken, signInAnonymously, 
+                onAuthStateChanged, getFirestore, collection, addDoc, onSnapshot 
+            } = window.FirebaseDeps;
+
+            // --- SVG Icons ---
+            const LayoutTemplateIcon = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="7" x="3" y="3" rx="1"/><rect width="9" height="7" x="3" y="14" rx="1"/><rect width="5" height="7" x="16" y="14" rx="1"/></svg>;
+            const CalendarIcon = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>;
+            const PlusCircleIcon = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>;
+            const ArrowLeftIcon = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>;
+            const DollarSignIcon = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>;
+            const CreditCardIcon = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>;
+            const InfoIcon = ({ className }) => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></svg>;
+
+            // --- Firebase Setup ---
+            // Added fallback dummy config to prevent crashes when running locally
+            const firebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_config 
+                ? JSON.parse(__firebase_config) 
+                : { apiKey: "demo", projectId: "demo", appId: "1:123:web:123" };
+                
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+            const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+            const App = () => {
+                const [user, setUser] = useState(null);
+                const [activeTab, setActiveTab] = useState('All');
+                const [currentView, setCurrentView] = useState('dashboard');
+                
+                // Data States
+                const [firebasePayments, setFirebasePayments] = useState([]);
+                const [isSaving, setIsSaving] = useState(false);
+                
+                // Payment Form States
+                const [paymentAmount, setPaymentAmount] = useState('');
+                const [paymentAccount, setPaymentAccount] = useState('Barclays');
+                const [paymentDate, setPaymentDate] = useState('');
+                
+                const [isAddingAccount, setIsAddingAccount] = useState(false);
+                const [customAccount, setCustomAccount] = useState('');
+
+                // Interactive Chart States
+                const [tooltip, setTooltip] = useState({ visible: false, x: 0, y: 0, content: null });
+                const [hoveredBarIndex, setHoveredBarIndex] = useState(null);
+                const [hoveredLineIndex, setHoveredLineIndex] = useState(null);
+
+                // --- Auth & Data Fetching ---
+                useEffect(() => {
+                    const initAuth = async () => {
+                        try {
+                            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                                await signInWithCustomToken(auth, __initial_auth_token);
+                            } else {
+                                await signInAnonymously(auth);
+                            }
+                        } catch (error) {
+                            console.error("Auth error", error);
+                        }
+                    };
+                    initAuth();
+                    
+                    const unsubscribe = onAuthStateChanged(auth, setUser);
+                    return () => unsubscribe();
+                }, []);
+
+                useEffect(() => {
+                    if (!user) return;
+                    
+                    const paymentsPath = collection(db, 'artifacts', appId, 'users', user.uid, 'payments');
+                    
+                    const unsubscribe = onSnapshot(paymentsPath, (snapshot) => {
+                        const payments = snapshot.docs.map(doc => ({
+                            id: doc.id,
+                            ...doc.data()
+                        }));
+                        // Sort by newest first based on creation date
+                        payments.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+                        setFirebasePayments(payments);
+                    }, (error) => {
+                        console.error("Firestore listen error:", error);
+                    });
+                    
+                    return () => unsubscribe();
+                }, [user]);
+
+                // --- Core Data Models ---
+                const formatCurrency = (val) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(val);
+
+                const baseTransactions = [
+                    { id: '1', account: 'Barclays', type: 'Purchase', desc: 'YJP Minneapolis', date: 'Jun 4, 2025', amount: 10300 },
+                    { id: '2', account: 'Barclays', type: 'Purchase', desc: 'YJP Minneapolis', date: 'May 5, 2025', amount: 1500 },
+                    { id: '3', account: 'Barclays', type: 'Purchase', desc: 'Jewish Beginnings MN', date: 'May 1, 2025', amount: 10100 },
+                    { id: '4', account: 'Barclays', type: 'Purchase', desc: 'Jewish Beginnings MN', date: 'May 1, 2025', amount: 400 },
+                    { id: '5', account: 'Barclays', type: 'Interest', desc: 'Purchase interest (9 months)', date: 'Jul–Mar 2026', amount: 1661.01 },
+                    { id: '6', account: 'Barclays', type: 'Fee', desc: 'Balance transfer interest + fees', date: 'Dec–Mar 2026', amount: 181.70 },
+                    { id: '7', account: 'Chase 1447', type: 'Purchase', desc: 'Jewish Beginnings', date: 'May 11, 2025', amount: 3900 },
+                    { id: '8', account: 'Chase 2376', type: 'Purchase', desc: 'YJP Minneapolis', date: 'May 27, 2025', amount: 9900 },
+                    { id: '9', account: 'Chase 2376', type: 'Purchase', desc: 'Jewish Beginnings', date: 'May 20, 2025', amount: 1500 },
+                    { id: '10', account: 'Chase 2376', type: 'Fee', desc: 'US Bank transfer fee', date: 'Oct 27, 2025', amount: 100 },
+                    { id: '11', account: 'Citi', type: 'Purchase', desc: 'YJP Minneapolis', date: 'May 27, 2025', amount: 16000 },
+                    { id: '12', account: 'Citi', type: 'Interest', desc: 'Standard purchase (8 months)', date: 'Jul–Feb 2026', amount: 2384.43 },
+                    { id: '13', account: 'Citi', type: 'Fee', desc: 'Balance transfer fee', date: 'Dec 25, 2025', amount: 122.32 },
+                    { id: '14', account: 'Barclays', type: 'Fee', desc: 'GreenPath service fees (5 payments)', date: 'Jan–Mar 2026', amount: 144.76 },
+                    { id: '15', account: 'Barclays', type: 'Payment', desc: 'Payment (Jewish Beginnings MN)', date: 'May 2025', amount: -10000 },
+                ];
+
+                const allTransactions = [...baseTransactions, ...firebasePayments];
+
+                // Dynamic Data Calculation Logic
+                const derivedAccounts = Array.from(new Set([
+                    'Barclays', 'Chase', 'Citi',
+                    ...firebasePayments.map(p => p.account)
+                ]));
+
+                const getTotalsForAccount = (accName) => {
+                    const accTxs = allTransactions.filter(t => t.account.includes(accName));
+                    const principal = accTxs.filter(t => t.type === 'Purchase' || t.type === 'Payment').reduce((s, t) => s + t.amount, 0);
+                    const interest = accTxs.filter(t => t.type === 'Interest').reduce((s, t) => s + t.amount, 0);
+                    const fee = accTxs.filter(t => t.type === 'Fee').reduce((s, t) => s + t.amount, 0);
+                    return { principal, interest, fee };
+                };
+
+                const barData = derivedAccounts.map(acc => ({
+                    name: acc,
+                    ...getTotalsForAccount(acc)
+                }));
+
+                // Calculate totals independently to ensure new checking accounts reduce the overall exposure
+                const totalPrincipal = allTransactions.filter(t => t.type === 'Purchase' || t.type === 'Payment').reduce((s, t) => s + t.amount, 0);
+                const totalInterest = allTransactions.filter(t => t.type === 'Interest').reduce((s, t) => s + t.amount, 0);
+                const totalFees = allTransactions.filter(t => t.type === 'Fee').reduce((s, t) => s + t.amount, 0);
+                const grandTotal = totalPrincipal + totalInterest + totalFees;
+
+                const summaryCards = [
+                    { label: 'Total active principal', value: formatCurrency(totalPrincipal), subtext: 'Net remaining after payments' },
+                    { label: 'Total interest paid', value: formatCurrency(totalInterest), subtext: 'Barclays + Citi' },
+                    { label: 'Total fees', value: formatCurrency(totalFees), subtext: 'BT fees + Service fees + Chase' },
+                    { label: 'Grand total exposure', value: formatCurrency(grandTotal), subtext: 'Current remaining balance' },
+                ];
+
+                const interestData = [
+                    { month: 'Jul', bar: 302.44, citi: 384.85 },
+                    { month: 'Aug', bar: 265.20, citi: 403.54 },
+                    { month: 'Sep', bar: 213.99, citi: 372.68 },
+                    { month: 'Oct', bar: 203.84, citi: 358.35 },
+                    { month: 'Nov', bar: 206.67, citi: 389.33 },
+                    { month: 'Dec', bar: 198.00, citi: 318.10 },
+                    { month: 'Jan', bar: 201.01, citi: 154.98 },
+                    { month: 'Feb', bar: 38.04, citi: 2.60 },
+                    { month: 'Mar', bar: 31.82, citi: 0 }
+                ];
+
+                const filteredTransactions = allTransactions.filter(t => 
+                    activeTab === 'All' || t.account.includes(activeTab)
+                );
+
+                // --- Handlers ---
+                const handleAddPayment = async (e) => {
+                    e.preventDefault();
+                    const finalAccount = isAddingAccount ? customAccount.trim() : paymentAccount;
+                    if (!user || !paymentAmount || !finalAccount || !paymentDate) return;
+                    
+                    setIsSaving(true);
+                    try {
+                        const paymentsPath = collection(db, 'artifacts', appId, 'users', user.uid, 'payments');
+                        await addDoc(paymentsPath, {
+                            account: finalAccount,
+                            date: new Date(paymentDate).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' }),
+                            amount: -Math.abs(parseFloat(paymentAmount)), // Force negative amount for payments
+                            desc: 'Repayment from Sholom Brook',
+                            type: 'Payment',
+                            createdAt: new Date().toISOString()
+                        });
+                        
+                        setPaymentAmount('');
+                        setPaymentDate('');
+                        setIsAddingAccount(false);
+                        setCustomAccount('');
+                        setCurrentView('dashboard');
+                    } catch (err) {
+                        console.error("Error saving payment:", err);
+                    } finally {
+                        setIsSaving(false);
+                    }
+                };
+
+                // --- SVG Chart Helpers ---
+                const maxInterest = 450;
+                const generateLinePath = (dataKey) => {
+                    return interestData.map((d, i) => {
+                        const x = 40 + i * ((800 - 60) / 8);
+                        const y = 200 - (d[dataKey] / maxInterest) * 160;
+                        return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+                    }).join(' ');
+                };
+
+                const generateAreaPath = (dataKey) => {
+                    const linePath = generateLinePath(dataKey);
+                    const lastX = 40 + 8 * ((800 - 60) / 8);
+                    return `${linePath} L ${lastX} 200 L 40 200 Z`;
+                };
+
+                const highestPrincipalScale = Math.max(16000, ...barData.map(b => b.principal));
+                const graphTickMarks = [
+                    Math.ceil(highestPrincipalScale / 1000) * 1000,
+                    Math.ceil(highestPrincipalScale * 0.75 / 1000) * 1000,
+                    Math.ceil(highestPrincipalScale * 0.50 / 1000) * 1000,
+                    Math.ceil(highestPrincipalScale * 0.25 / 1000) * 1000
+                ];
+
+                // --- Renders ---
+                if (currentView === 'payment-form') {
+                    return (
+                        <div className="min-h-screen bg-[#FAF9F5] p-4 md:p-8 font-sans text-gray-900 flex justify-center items-start">
+                            <div className="bg-white rounded-2xl shadow-sm border border-gray-200 w-full max-w-lg p-6 mt-8">
+                            <button 
+                                onClick={() => setCurrentView('dashboard')}
+                                className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-900 mb-6 transition-colors"
+                            >
+                                <ArrowLeftIcon className="w-4 h-4" /> Back to Dashboard
+                            </button>
+
+                            <div className="mb-8">
+                                <h1 className="text-2xl font-bold text-gray-900 mb-2">Record Sholom's Repayment</h1>
+                                <p className="text-sm text-gray-500">Log a repayment from Sholom Brook. This will automatically deduct from your total exposure.</p>
+                            </div>
+
+                            <form onSubmit={handleAddPayment} className="space-y-5">
+                                <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2"><CreditCardIcon className="w-4 h-4 text-blue-500"/> Deposited Account</label>
+                                {isAddingAccount ? (
+                                    <div className="flex gap-2">
+                                    <input 
+                                        type="text" 
+                                        value={customAccount}
+                                        onChange={(e) => setCustomAccount(e.target.value)}
+                                        className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none"
+                                        placeholder="Enter new account name"
+                                        required
+                                        autoFocus
+                                    />
+                                    <button 
+                                        type="button" 
+                                        onClick={() => { setIsAddingAccount(false); setCustomAccount(''); setPaymentAccount('Barclays'); }}
+                                        className="px-4 py-2 text-sm font-medium text-gray-600 bg-gray-200 rounded-lg hover:bg-gray-300 transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    </div>
+                                ) : (
+                                    <select 
+                                    value={paymentAccount} 
+                                    onChange={(e) => {
+                                        if (e.target.value === 'ADD_NEW') {
+                                        setIsAddingAccount(true);
+                                        setPaymentAccount('');
+                                        } else {
+                                        setPaymentAccount(e.target.value);
+                                        }
+                                    }}
+                                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none"
+                                    required
+                                    >
+                                    {derivedAccounts.map(acc => (
+                                        <option key={acc} value={acc}>{acc}</option>
+                                    ))}
+                                    <option value="ADD_NEW" className="font-semibold text-blue-600">+ Add new account...</option>
+                                    </select>
+                                )}
+                                </div>
+
+                                <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2"><DollarSignIcon className="w-4 h-4 text-emerald-500"/> Payment Amount</label>
+                                <div className="relative">
+                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                    <span className="text-gray-500 sm:text-sm">$</span>
+                                    </div>
+                                    <input 
+                                    type="number" 
+                                    step="0.01"
+                                    min="0"
+                                    value={paymentAmount}
+                                    onChange={(e) => setPaymentAmount(e.target.value)}
+                                    className="w-full pl-8 bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none"
+                                    placeholder="0.00"
+                                    required
+                                    />
+                                </div>
+                                </div>
+
+                                <div>
+                                <label className="block text-sm font-medium text-gray-700 mb-1 flex items-center gap-2"><CalendarIcon className="w-4 h-4 text-purple-500"/> Date Received</label>
+                                <input 
+                                    type="date" 
+                                    value={paymentDate}
+                                    onChange={(e) => setPaymentDate(e.target.value)}
+                                    className="w-full bg-gray-50 border border-gray-200 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-3 outline-none"
+                                    required
+                                />
+                                </div>
+
+                                <div className="pt-4">
+                                <button 
+                                    type="submit" 
+                                    disabled={isSaving}
+                                    className="w-full flex justify-center items-center gap-2 text-white bg-gray-900 hover:bg-gray-800 focus:ring-4 focus:ring-gray-300 font-medium rounded-lg text-sm px-5 py-3.5 transition-colors disabled:opacity-70 disabled:cursor-not-allowed"
+                                >
+                                    {isSaving ? 'Saving securely...' : 'Save Payment'}
+                                </button>
+                                </div>
+                            </form>
+                            </div>
+                        </div>
+                    );
+                }
+
+                return (
+                    <div className="min-h-screen bg-[#FAF9F5] p-4 md:p-8 font-sans text-gray-900 relative overflow-hidden">
+                    {/* Tooltip Overlay */}
+                    {tooltip.visible && tooltip.content && (
+                        <div 
+                        className="fixed z-50 bg-gray-900/95 backdrop-blur-sm text-white text-xs rounded-lg shadow-xl p-3 pointer-events-none transform -translate-x-1/2 -translate-y-[calc(100%+15px)]"
+                        style={{ left: tooltip.x, top: tooltip.y }}
+                        >
+                        {tooltip.content}
+                        <div className="absolute top-full left-1/2 transform -translate-x-1/2 w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[6px] border-t-gray-900/95"></div>
+                        </div>
+                    )}
+                    
+                    <div className="max-w-6xl mx-auto space-y-8 pb-12">
+                        
+                        {/* Header Section */}
+                        <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-200 pb-4">
+                        <div className="flex items-center gap-3">
+                            <div className="p-2 bg-blue-50 rounded-lg border border-blue-100">
+                            <LayoutTemplateIcon className="w-5 h-5 text-blue-600" />
+                            </div>
+                            <div>
+                            <h1 className="text-xl font-semibold tracking-tight text-gray-900 flex items-center gap-2">
+                                Matti Weingarten <span className="text-gray-400 font-normal hidden sm:inline">— account summary</span>
+                            </h1>
+                            <p className="text-sm text-gray-500 mt-0.5">Barclays · Chase · Citi</p>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-3 w-full md:w-auto">
+                            <div className="hidden sm:flex items-center gap-2 text-sm text-gray-500 bg-white px-3 py-2 rounded-full border border-gray-200 shadow-sm">
+                            <CalendarIcon className="w-4 h-4" />
+                            May 2025 – Present
+                            </div>
+                            <button 
+                            onClick={() => setCurrentView('payment-form')}
+                            className="flex-1 md:flex-none flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium px-4 py-2 rounded-full shadow-sm transition-colors"
+                            >
+                            <PlusCircleIcon className="w-4 h-4" /> Record Payment
+                            </button>
+                        </div>
+                        </header>
+
+                        {/* Top Summary Cards */}
+                        <section>
+                        <h2 className="text-xs font-bold text-gray-500 tracking-wider mb-3 uppercase">Total Exposure</h2>
+                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                            {summaryCards.map((card, idx) => (
+                            <div key={idx} className="bg-[#F3F1E7] p-5 rounded-xl border border-[#e5e2d6] relative overflow-hidden group">
+                                <div className="relative z-10">
+                                <p className="text-sm text-gray-600 mb-1">{card.label}</p>
+                                <p className="text-2xl font-bold text-gray-900 mb-2">{card.value}</p>
+                                <p className="text-xs text-gray-500">{card.subtext}</p>
+                                </div>
+                            </div>
+                            ))}
+                        </div>
+                        </section>
+
+                        {/* Charts Section */}
+                        <div className="grid grid-cols-1 gap-8">
+                        
+                        {/* Bar Chart: Breakdown by Account */}
+                        <section className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm">
+                            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
+                            <h2 className="text-xs font-bold text-gray-500 tracking-wider uppercase flex items-center gap-2">
+                                Breakdown by Account
+                                <div className="group relative hidden sm:block">
+                                <InfoIcon className="w-3.5 h-3.5 text-gray-400 cursor-help" />
+                                <div className="absolute left-1/2 -translate-x-1/2 bottom-full mb-2 w-48 p-2 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10 text-center">
+                                    Payments deduct directly from the active principal.
+                                </div>
+                                </div>
+                            </h2>
+                            <div className="flex gap-3 text-xs sm:text-sm font-normal text-gray-600">
+                                <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-[#3B82F6] rounded-sm"></div> Principal</span>
+                                <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-[#EF4444] rounded-sm"></div> Interest</span>
+                                <span className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 bg-[#F59E0B] rounded-sm"></div> Fees</span>
+                            </div>
+                            </div>
+                            
+                            <div className="relative h-64 w-full border-b border-gray-200 flex items-end justify-around pb-0">
+                            {/* Grid Lines */}
+                            {graphTickMarks.map((val, i) => (
+                                <div key={i} className="absolute w-full border-t border-gray-100 flex items-start" style={{ bottom: `${(val/graphTickMarks[0])*100}%` }}>
+                                <span className="text-[10px] text-gray-400 absolute -top-4 -left-2">${(val/1000)}k</span>
+                                </div>
+                            ))}
+
+                            {barData.map((d, i) => (
+                                <div 
+                                key={i} 
+                                className={`flex flex-col items-center gap-2 z-10 w-full cursor-pointer transition-opacity duration-300 ${hoveredBarIndex !== null && hoveredBarIndex !== i ? 'opacity-40' : 'opacity-100'}`}
+                                onMouseEnter={() => setHoveredBarIndex(i)}
+                                onMouseLeave={() => {
+                                    setHoveredBarIndex(null);
+                                    setTooltip({ ...tooltip, visible: false });
+                                }}
+                                onMouseMove={(e) => setTooltip({
+                                    visible: true,
+                                    x: e.clientX,
+                                    y: e.clientY,
+                                    content: (
+                                    <div className="flex flex-col gap-1.5 min-w-[140px]">
+                                        <p className="font-bold text-sm mb-1">{d.name}</p>
+                                        <div className="flex justify-between gap-4"><span className="text-blue-300">Principal:</span> <span>{formatCurrency(d.principal)}</span></div>
+                                        <div className="flex justify-between gap-4"><span className="text-red-300">Interest:</span> <span>{formatCurrency(d.interest)}</span></div>
+                                        <div className="flex justify-between gap-4"><span className="text-amber-300">Fees:</span> <span>{formatCurrency(d.fee)}</span></div>
+                                        <div className="flex justify-between gap-4 border-t border-gray-600 mt-1 pt-1 font-bold"><span>Total:</span> <span>{formatCurrency(d.principal + d.interest + d.fee)}</span></div>
+                                    </div>
+                                    )
+                                })}
+                                >
+                                <div className="flex items-end gap-1 h-56">
+                                    <div className="w-6 sm:w-12 bg-[#3B82F6] rounded-t-sm hover:brightness-110 transition-all" style={{ height: `${Math.max(0, (d.principal / graphTickMarks[0]) * 100)}%` }}></div>
+                                    <div className="w-6 sm:w-12 bg-[#EF4444] rounded-t-sm hover:brightness-110 transition-all" style={{ height: `${Math.max(0, (d.interest / graphTickMarks[0]) * 100)}%` }}></div>
+                                    <div className="w-6 sm:w-12 bg-[#F59E0B] rounded-t-sm hover:brightness-110 transition-all" style={{ height: `${Math.max(0, (d.fee / graphTickMarks[0]) * 100)}%` }}></div>
+                                </div>
+                                <span className="text-xs text-gray-600 font-medium pt-2">{d.name}</span>
+                                </div>
+                            ))}
+                            </div>
+                        </section>
+
+                        {/* Line Chart: Interest Over Time */}
+                        <section className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm overflow-x-auto">
+                            <h2 className="text-xs font-bold text-gray-500 tracking-wider mb-6 uppercase flex gap-4 items-center">
+                            Interest Over Time (Barclays + Citi)
+                            <div className="flex gap-4 normal-case font-normal text-gray-600">
+                                <span className="flex items-center gap-1.5"><div className="w-3 h-0.5 bg-[#3B82F6]"></div> Barclays purchase interest</span>
+                                <span className="flex items-center gap-1.5"><div className="w-3 h-0.5 border-t-2 border-dashed border-[#EF4444]"></div> Citi standard interest</span>
+                            </div>
+                            </h2>
+                            
+                            <div className="min-w-[600px] w-full">
+                            <svg viewBox="0 0 800 240" className="w-full h-auto drop-shadow-sm">
+                                {/* Y-Axis Guidelines */}
+                                {[0, 50, 100, 150, 200, 250, 300, 350, 400, 450].map((val) => {
+                                const y = 200 - (val / maxInterest) * 160;
+                                return (
+                                    <g key={val}>
+                                    <line x1="40" y1={y} x2="800" y2={y} stroke="#f3f4f6" strokeWidth="1" />
+                                    <text x="30" y={y + 4} fontSize="10" fill="#9ca3af" textAnchor="end">${val}</text>
+                                    </g>
+                                );
+                                })}
+
+                                {/* X-Axis Labels */}
+                                {interestData.map((d, i) => (
+                                <text key={d.month} x={40 + i * ((800 - 60) / 8)} y="220" fontSize="11" fill="#6b7280" textAnchor="middle">
+                                    {d.month}
+                                </text>
+                                ))}
+
+                                {/* Barclays Area & Line */}
+                                <path d={generateAreaPath('bar')} fill="#3B82F6" fillOpacity="0.05" />
+                                <path d={generateLinePath('bar')} fill="none" stroke="#3B82F6" strokeWidth="2.5" />
+                                
+                                {/* Citi Area & Line */}
+                                <path d={generateAreaPath('citi')} fill="#EF4444" fillOpacity="0.05" />
+                                <path d={generateLinePath('citi')} fill="none" stroke="#EF4444" strokeWidth="2" strokeDasharray="5,5" />
+
+                                {/* Interactive Data Points */}
+                                {interestData.map((d, i) => {
+                                const x = 40 + i * ((800 - 60) / 8);
+                                const yBar = 200 - (d.bar / maxInterest) * 160;
+                                const yCiti = 200 - (d.citi / maxInterest) * 160;
+                                const isHovered = hoveredLineIndex === i;
+                                return (
+                                    <g key={i}>
+                                    {isHovered && (
+                                        <line x1={x} y1="40" x2={x} y2="200" stroke="#e5e7eb" strokeWidth="2" strokeDasharray="4,4" />
+                                    )}
+                                    <circle cx={x} cy={yBar} r={isHovered ? "6" : "4"} fill={isHovered ? "#3B82F6" : "white"} stroke="#3B82F6" strokeWidth={isHovered ? "3" : "2"} className="transition-all duration-200" />
+                                    <circle cx={x} cy={yCiti} r={isHovered ? "6" : "4"} fill={isHovered ? "#EF4444" : "white"} stroke="#EF4444" strokeWidth={isHovered ? "3" : "2"} className="transition-all duration-200" />
+                                    
+                                    <rect 
+                                        x={x - 20} y={0} width={40} height={240} fill="transparent" 
+                                        className="cursor-pointer"
+                                        onMouseEnter={() => setHoveredLineIndex(i)}
+                                        onMouseLeave={() => {
+                                        setHoveredLineIndex(null);
+                                        setTooltip({ ...tooltip, visible: false });
+                                        }}
+                                        onMouseMove={(e) => setTooltip({
+                                        visible: true,
+                                        x: e.clientX,
+                                        y: e.clientY,
+                                        content: (
+                                            <div className="flex flex-col gap-1.5 min-w-[130px]">
+                                            <p className="font-bold text-sm mb-1">{d.month} Interest</p>
+                                            <div className="flex justify-between gap-4"><span className="text-blue-300">Barclays:</span> <span>{formatCurrency(d.bar)}</span></div>
+                                            <div className="flex justify-between gap-4"><span className="text-red-300">Citi:</span> <span>{formatCurrency(d.citi)}</span></div>
+                                            <div className="flex justify-between gap-4 border-t border-gray-600 mt-1 pt-1 font-bold"><span>Total:</span> <span>{formatCurrency(d.bar + d.citi)}</span></div>
+                                            </div>
+                                        )
+                                        })}
+                                    />
+                                    </g>
+                                );
+                                })}
+                            </svg>
+                            </div>
+                        </section>
+                        </div>
+
+                        {/* Transaction Detail Table */}
+                        <section className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
+                        <div className="p-4 border-b border-gray-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <h2 className="text-xs font-bold text-gray-500 tracking-wider uppercase">Transaction Detail</h2>
+                            <div className="flex gap-2 overflow-x-auto w-full sm:w-auto pb-2 sm:pb-0 hide-scrollbar">
+                            {['All', ...derivedAccounts].map(tab => (
+                                <button
+                                key={tab}
+                                onClick={() => setActiveTab(tab)}
+                                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors whitespace-nowrap ${
+                                    activeTab === tab 
+                                    ? 'bg-gray-100 text-gray-900 border border-gray-300' 
+                                    : 'bg-white text-gray-500 border border-gray-200 hover:bg-gray-50'
+                                }`}
+                                >
+                                {tab}
+                                </button>
+                            ))}
+                            </div>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-sm text-left">
+                            <thead className="bg-[#FAF9F5] text-gray-500 border-b border-gray-200">
+                                <tr>
+                                <th className="px-6 py-3 font-medium">Account</th>
+                                <th className="px-6 py-3 font-medium">Description</th>
+                                <th className="px-6 py-3 font-medium">Date</th>
+                                <th className="px-6 py-3 font-medium text-right">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                                {filteredTransactions.map((tx) => (
+                                <tr key={tx.id} className="hover:bg-gray-50/50 transition-colors">
+                                    <td className="px-6 py-3 text-gray-900 font-medium">{tx.account}</td>
+                                    <td className="px-6 py-3">
+                                    <div className="flex items-center gap-3">
+                                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${
+                                        tx.type === 'Purchase' ? 'bg-blue-50 text-blue-600' :
+                                        tx.type === 'Interest' ? 'bg-red-50 text-red-600' :
+                                        tx.type === 'Payment' ? 'bg-emerald-50 text-emerald-600' :
+                                        'bg-amber-50 text-amber-600'
+                                        }`}>
+                                        {tx.type}
+                                        </span>
+                                        <span className="text-gray-700">{tx.desc}</span>
+                                    </div>
+                                    </td>
+                                    <td className="px-6 py-3 text-gray-500">{tx.date}</td>
+                                    <td className={`px-6 py-3 text-right font-medium ${tx.amount < 0 ? 'text-emerald-600' : 'text-gray-900'}`}>
+                                    {formatCurrency(tx.amount)}
+                                    </td>
+                                </tr>
+                                ))}
+                            </tbody>
+                            <tfoot className="bg-[#FAF9F5] border-t-2 border-gray-200">
+                                <tr>
+                                <td colSpan="3" className="px-6 py-4 font-bold text-gray-900 text-right">
+                                    {activeTab === 'All' ? 'Current Exposure' : `${activeTab} Exposure`}
+                                </td>
+                                <td className="px-6 py-4 font-bold text-gray-900 text-right">
+                                    {formatCurrency(filteredTransactions.reduce((sum, tx) => sum + tx.amount, 0))}
+                                </td>
+                                </tr>
+                            </tfoot>
+                            </table>
+                        </div>
+                        </section>
+
+                    </div>
+                    </div>
+                );
+            };
+
+            const rootElement = document.getElementById('root');
+            const root = ReactDOM.createRoot(rootElement);
+            root.render(<App />);
+        };
+
+        // Attach to the event dispatched above to guarantee the Firebase API modules are fully downloaded and ready.
+        if (window.FirebaseDeps) {
+            initializeReactApp();
+        } else {
+            window.addEventListener('firebase-ready', initializeReactApp);
+        }
+    </script>
+    
+    <style>
+        /* Small utility to hide scrollbar from the tabs container visually, but keep it functional */
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</body>
+</html>
